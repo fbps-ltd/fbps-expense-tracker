@@ -187,7 +187,7 @@
         <div class="min-w-0">
           <div class="flex items-center space-x-1.5 whitespace-nowrap">
             <h1 class="text-sm font-extrabold tracking-tight text-slate-900 leading-none whitespace-nowrap">FBPS 口座外支出トラッカー</h1>
-            <span class="px-1.5 py-0.2 rounded-full bg-indigo-50 text-indigo-700 font-extrabold text-[8.5px] border border-indigo-200/80 shadow-2xs whitespace-nowrap">v1.07</span>
+            <span class="px-1.5 py-0.2 rounded-full bg-indigo-50 text-indigo-700 font-extrabold text-[8.5px] border border-indigo-200/80 shadow-2xs whitespace-nowrap">v1.08</span>
           </div>
           <span id="headerPeriodSub" class="text-[10px] font-bold text-indigo-600 block mt-0.5 leading-none">当月</span>
         </div>
@@ -1242,28 +1242,13 @@
       <div class="flex items-center justify-between border-b border-slate-100 pb-2 flex-shrink-0">
         <div>
           <h3 class="text-sm font-extrabold text-slate-800">支払い方法の管理</h3>
-          <p class="text-[10px] text-slate-400">大分類を展開し、カード・決済方法の追加や削除</p>
+          <p class="text-[10px] text-slate-400">大分類を展開し、追加・名前変更・削除・並び替え</p>
         </div>
         <button type="button" onclick="closeModal('paymentMethodManageModal')" class="text-slate-400 hover:text-slate-600 text-xl leading-none">&times;</button>
       </div>
 
-      <!-- 4大分類アコーディオンリスト -->
+      <!-- 4大分類アコーディオンリスト（各分類内に直接追加フォームを内蔵） -->
       <div id="paymentMethodAccordionContainer" class="flex-1 overflow-y-auto custom-scrollbar space-y-2 pr-1 py-1"></div>
-
-      <!-- 新規追加フォーム -->
-      <div class="p-3 bg-slate-50 border border-slate-200/80 rounded-2xl space-y-1.5 flex-shrink-0">
-        <span class="text-[10.5px] font-extrabold text-slate-700 block">＋ 新しい支払い方法を追加</span>
-        <div class="grid grid-cols-2 gap-1.5 mb-1.5">
-          <select id="inputNewPaymentType" class="bg-white border border-slate-200 rounded-xl px-2 py-1.5 text-xs font-semibold outline-none focus:border-indigo-500">
-            <option value="corporate_card">法人カード</option>
-            <option value="personal_card">個人カード (立替)</option>
-            <option value="electronic">電子マネー・QR</option>
-            <option value="cash">現金・振込</option>
-          </select>
-          <input type="text" id="inputNewPaymentName" placeholder="名称（例: JCB Biz）" class="bg-white border border-slate-200 rounded-xl px-2.5 py-1.5 text-xs font-semibold outline-none focus:border-indigo-500">
-        </div>
-        <button type="button" onclick="addNewPaymentMethod()" class="w-full py-1.5 bg-indigo-600 text-white rounded-xl text-xs font-bold hover:bg-indigo-700 active:scale-95 transition shadow-xs">追加する</button>
-      </div>
 
       <div class="border-t border-slate-100 pt-2.5 flex items-center justify-between flex-shrink-0">
         <button type="button" onclick="resetPaymentMethodsToDefault()" class="text-[11px] font-bold text-slate-400 hover:text-rose-600 underline transition">初期状態に戻す</button>
@@ -1731,8 +1716,8 @@
       cash: '現金・振込'
     };
 
-    // 展開中の支払い方法アコーディオンのセット
-    let expandedPayTypes = new Set(['corporate_card', 'personal_card', 'electronic', 'cash']);
+    // 展開中の支払い方法アコーディオンのセット（初期状態は「法人カード」のみ展開、他は全閉）
+    let expandedPayTypes = new Set(['corporate_card']);
 
     // 支払い方法のメタデータ取得ヘルパー
     function getPaymentMethodMeta(name) {
@@ -3190,7 +3175,10 @@
     }
 
     // ==================== 支払い方法管理モーダル（4大分類アコーディオン＋追加・削除） ====================
+    let editingPaymentMethodId = null;
+
     function openPaymentMethodManageModal() {
+      editingPaymentMethodId = null;
       renderPaymentMethodAccordion();
       openModal('paymentMethodManageModal');
     }
@@ -3234,28 +3222,98 @@
         `;
         section.appendChild(headerBtn);
 
-        // 各分類のアイテム一覧
+        // 各分類のアイテム一覧 & 分類専用追加フォーム
         if (isExpanded) {
           const body = document.createElement('div');
-          body.className = 'p-2 space-y-1 bg-white border-t border-slate-100';
+          body.className = 'p-2 space-y-1.5 bg-white border-t border-slate-100';
 
           if (items.length === 0) {
-            body.innerHTML = '<p class="text-[10px] text-slate-400 text-center py-1">登録されている決済方法はありません</p>';
+            const emptyP = document.createElement('p');
+            emptyP.className = 'text-[10px] text-slate-400 text-center py-1';
+            emptyP.textContent = '登録されている決済方法はありません';
+            body.appendChild(emptyP);
           } else {
-            items.forEach(pm => {
+            items.forEach((pm, idx) => {
+              const isFirst = (idx === 0);
+              const isLast = (idx === items.length - 1);
+              const isEditing = (editingPaymentMethodId === pm.id);
+
               const row = document.createElement('div');
               row.className = 'flex items-center justify-between p-1.5 px-2.5 rounded-xl bg-slate-50 border border-slate-100 text-xs';
-              row.innerHTML = `
-                <div class="flex items-center space-x-2 truncate min-w-0 pr-2">
-                  <span class="font-extrabold text-slate-800 truncate">${escapeHtml(pm.name)}</span>
-                </div>
-                <button type="button" onclick="promptDeletePaymentMethod('${pm.id}')" class="text-slate-400 hover:text-rose-600 p-1 rounded-lg hover:bg-white active:scale-90 transition flex items-center justify-center flex-shrink-0" title="削除">
-                  <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
-                </button>
-              `;
+
+              if (isEditing) {
+                row.innerHTML = `
+                  <div class="flex items-center space-x-1.5 flex-1 min-w-0 pr-1.5">
+                    <input type="text" id="editPayInput_${pm.id}" value="${escapeHtml(pm.name)}" class="flex-1 bg-white border border-indigo-400 rounded-lg px-2 py-1 text-xs font-bold outline-none focus:ring-1 focus:ring-indigo-500">
+                  </div>
+                  <div class="flex items-center space-x-1 flex-shrink-0">
+                    <button type="button" onclick="saveEditedPaymentMethod('${pm.id}')" class="p-1 px-2.5 rounded-lg bg-indigo-600 text-white text-[11px] font-bold active:scale-95 transition shadow-xs">保存</button>
+                    <button type="button" onclick="cancelEditingPaymentMethod()" class="p-1 px-2 rounded-lg bg-slate-200 text-slate-600 text-[11px] font-bold active:scale-95 transition">取消</button>
+                  </div>
+                `;
+              } else {
+                row.innerHTML = `
+                  <div class="flex items-center space-x-2 truncate min-w-0 pr-1.5">
+                    <span class="font-extrabold text-slate-800 truncate">${escapeHtml(pm.name)}</span>
+                  </div>
+                  <div class="flex items-center space-x-1 flex-shrink-0">
+                    <!-- 編集（線画ペンシルSVG） -->
+                    <button type="button" onclick="startEditingPaymentMethod('${pm.id}')" class="p-1 px-1.5 rounded-lg bg-white border border-slate-200 text-slate-500 hover:text-indigo-600 active:scale-90 transition flex items-center justify-center" title="名称変更">
+                      <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                    </button>
+                    <!-- 削除（縦スリット入り線画ゴミ箱SVG・塗りつぶしなし） -->
+                    <button type="button" onclick="promptDeletePaymentMethod('${pm.id}')" class="p-1 px-1.5 rounded-lg bg-white border border-slate-200 text-slate-400 hover:text-rose-600 active:scale-90 transition flex items-center justify-center" title="削除">
+                      <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M3 6h18"/>
+                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/>
+                        <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                        <line x1="10" y1="11" x2="10" y2="17"/>
+                        <line x1="14" y1="11" x2="14" y2="17"/>
+                      </svg>
+                    </button>
+                    <!-- 先頭へ移動 -->
+                    ${!isFirst ? `
+                      <button type="button" onclick="movePaymentMethodToTop('${tKey}', '${pm.id}')" class="p-1 px-1.5 rounded-lg bg-white border border-slate-200 text-slate-500 hover:text-indigo-600 active:scale-90 transition flex items-center justify-center" title="先頭へ移動">
+                        <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7M5 5h14"/></svg>
+                      </button>
+                    ` : ''}
+                    <!-- 1つ上へ -->
+                    <button type="button" onclick="movePaymentMethodStep('${tKey}', '${pm.id}', -1)" ${isFirst ? 'disabled' : ''} class="w-6 h-6 rounded-lg bg-white border border-slate-200 flex items-center justify-center text-slate-600 hover:text-indigo-600 disabled:opacity-30 disabled:pointer-events-none active:scale-90 transition font-bold text-xs" title="1つ上へ">
+                      ▲
+                    </button>
+                    <!-- 1つ下へ -->
+                    <button type="button" onclick="movePaymentMethodStep('${tKey}', '${pm.id}', 1)" ${isLast ? 'disabled' : ''} class="w-6 h-6 rounded-lg bg-white border border-slate-200 flex items-center justify-center text-slate-600 hover:text-indigo-600 disabled:opacity-30 disabled:pointer-events-none active:scale-90 transition font-bold text-xs" title="1つ下へ">
+                      ▼
+                    </button>
+                  </div>
+                `;
+              }
               body.appendChild(row);
             });
           }
+
+          // その分類専用の新規追加フォーム（確実にタップできる配置）
+          const addBox = document.createElement('div');
+          addBox.className = 'pt-1.5 border-t border-slate-100 flex items-center space-x-1.5';
+          addBox.innerHTML = `
+            <input type="text" id="inputAddPay_${tKey}" placeholder="＋ ${paymentTypeLabels[tKey]}を追加（例: ${tKey === 'corporate_card' ? 'セゾンBiz' : tKey === 'personal_card' ? 'PayPayカード' : tKey === 'electronic' ? 'LINE Pay' : '小口現金'}）" class="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5 text-xs font-semibold outline-none focus:border-indigo-500">
+            <button type="button" onclick="addNewPaymentMethodForCategory('${tKey}')" class="px-3 py-1.5 bg-indigo-600 text-white rounded-xl text-xs font-bold active:scale-95 transition flex-shrink-0 shadow-xs cursor-pointer">追加</button>
+          `;
+          body.appendChild(addBox);
+
+          // Enterキーでの即時追加対応
+          setTimeout(() => {
+            const inputEl = document.getElementById(`inputAddPay_${tKey}`);
+            if (inputEl) {
+              inputEl.addEventListener('keydown', (ev) => {
+                if (ev.key === 'Enter') {
+                  ev.preventDefault();
+                  addNewPaymentMethodForCategory(tKey);
+                }
+              });
+            }
+          }, 20);
+
           section.appendChild(body);
         }
 
@@ -3263,13 +3321,71 @@
       });
     }
 
-    function addNewPaymentMethod() {
-      const typeSelect = document.getElementById('inputNewPaymentType');
-      const nameInput = document.getElementById('inputNewPaymentName');
-      if (!nameInput || !typeSelect) return;
+    function startEditingPaymentMethod(id) {
+      editingPaymentMethodId = id;
+      renderPaymentMethodAccordion();
+      setTimeout(() => {
+        const input = document.getElementById(`editPayInput_${id}`);
+        if (input) {
+          input.focus();
+          input.select();
+        }
+      }, 50);
+    }
 
-      const name = nameInput.value.trim();
-      const type = typeSelect.value;
+    function cancelEditingPaymentMethod() {
+      editingPaymentMethodId = null;
+      renderPaymentMethodAccordion();
+    }
+
+    function saveEditedPaymentMethod(id) {
+      const input = document.getElementById(`editPayInput_${id}`);
+      if (!input) return;
+      const newName = input.value.trim();
+      const target = paymentMethods.find(pm => pm.id === id);
+      if (!target) return;
+      const oldName = target.name;
+
+      if (!newName) {
+        showToast('名称を入力してください', true);
+        return;
+      }
+      if (newName === oldName) {
+        editingPaymentMethodId = null;
+        renderPaymentMethodAccordion();
+        return;
+      }
+      if (paymentMethods.some(pm => pm.id !== id && pm.name === newName)) {
+        showToast('同名の支払い方法が既に存在します', true);
+        return;
+      }
+
+      target.name = newName;
+
+      // 既存明細や定期ルールの名称も連動更新
+      transactions.forEach(t => {
+        if (t.paymentMethod === oldName) t.paymentMethod = newName;
+      });
+      recurringRules.forEach(r => {
+        if (r.paymentMethod === oldName) r.paymentMethod = newName;
+      });
+      if (currentSelectedPayment === oldName) {
+        currentSelectedPayment = newName;
+      }
+
+      editingPaymentMethodId = null;
+      saveStoredData();
+      renderPaymentMethodAccordion();
+      setupManualPaymentDropdown();
+      setupRecurringFormDropdowns();
+      refreshDashboard();
+      showToast(`「${newName}」に名称変更しました`);
+    }
+
+    function addNewPaymentMethodForCategory(typeKey) {
+      const input = document.getElementById(`inputAddPay_${typeKey}`);
+      if (!input) return;
+      const name = input.value.trim();
 
       if (!name) {
         showToast('支払い方法の名称を入力してください', true);
@@ -3281,16 +3397,57 @@
       }
 
       const newId = `pay_${Date.now()}`;
-      paymentMethods.push({ id: newId, name, type });
-      expandedPayTypes.add(type);
+      paymentMethods.push({ id: newId, name, type: typeKey });
+      expandedPayTypes.add(typeKey);
       saveStoredData();
 
-      nameInput.value = '';
+      input.value = '';
       renderPaymentMethodAccordion();
       setupManualPaymentDropdown();
       setupRecurringFormDropdowns();
       refreshDashboard();
       showToast(`「${name}」を追加しました`);
+    }
+
+    function movePaymentMethodStep(typeKey, id, delta) {
+      const groupItems = paymentMethods.filter(pm => pm.type === typeKey);
+      const subIdx = groupItems.findIndex(pm => pm.id === id);
+      if (subIdx === -1) return;
+      const targetSubIdx = subIdx + delta;
+      if (targetSubIdx < 0 || targetSubIdx >= groupItems.length) return;
+
+      const globalIdx = paymentMethods.findIndex(pm => pm.id === id);
+      const targetId = groupItems[targetSubIdx].id;
+      const targetGlobalIdx = paymentMethods.findIndex(pm => pm.id === targetId);
+
+      // 配列内の要素を入れ替え
+      const temp = paymentMethods[globalIdx];
+      paymentMethods[globalIdx] = paymentMethods[targetGlobalIdx];
+      paymentMethods[targetGlobalIdx] = temp;
+
+      saveStoredData();
+      renderPaymentMethodAccordion();
+      setupManualPaymentDropdown();
+      setupRecurringFormDropdowns();
+    }
+
+    function movePaymentMethodToTop(typeKey, id) {
+      const groupItems = paymentMethods.filter(pm => pm.type === typeKey);
+      if (groupItems.length <= 1 || groupItems[0].id === id) return;
+
+      const globalIdx = paymentMethods.findIndex(pm => pm.id === id);
+      const targetItem = paymentMethods.splice(globalIdx, 1)[0];
+
+      // グループ内の先頭要素の直前に挿入
+      const firstGroupItem = groupItems[0];
+      const insertIdx = paymentMethods.findIndex(pm => pm.id === firstGroupItem.id);
+      paymentMethods.splice(insertIdx, 0, targetItem);
+
+      saveStoredData();
+      renderPaymentMethodAccordion();
+      setupManualPaymentDropdown();
+      setupRecurringFormDropdowns();
+      showToast(`「${targetItem.name}」を先頭に移動しました`);
     }
 
     function promptDeletePaymentMethod(id) {
@@ -3324,6 +3481,7 @@
 
     function resetPaymentMethodsToDefault() {
       paymentMethods = [...defaultPaymentMethods];
+      expandedPayTypes = new Set(['corporate_card']);
       saveStoredData();
       renderPaymentMethodAccordion();
       setupManualPaymentDropdown();

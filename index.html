@@ -187,7 +187,7 @@
         <div class="min-w-0">
           <div class="flex items-center space-x-1.5 whitespace-nowrap">
             <h1 class="text-sm font-extrabold tracking-tight text-slate-900 leading-none whitespace-nowrap">FBPS 口座外支出トラッカー</h1>
-            <span class="px-1.5 py-0.2 rounded-full bg-indigo-50 text-indigo-700 font-extrabold text-[8.5px] border border-indigo-200/80 shadow-2xs whitespace-nowrap">v1.04</span>
+            <span class="px-1.5 py-0.2 rounded-full bg-indigo-50 text-indigo-700 font-extrabold text-[8.5px] border border-indigo-200/80 shadow-2xs whitespace-nowrap">v1.05</span>
           </div>
           <span id="headerPeriodSub" class="text-[10px] font-bold text-indigo-600 block mt-0.5 leading-none">当月</span>
         </div>
@@ -1492,6 +1492,19 @@
       <!-- フォーム本体（1画面固定収容） -->
       <div class="py-2 space-y-2 overflow-visible text-xs">
         
+        <!-- 重複検知警告バナー（絵文字なし・ビジネス調） -->
+        <div id="receiptDuplicateAlertBox" class="hidden p-2.5 rounded-2xl bg-rose-50 border border-rose-200 text-rose-900 space-y-0.5 animate-scale-up">
+          <div class="flex items-center space-x-1.5 font-black text-[11px] text-rose-700">
+            <svg class="w-3.5 h-3.5 text-rose-600 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+            </svg>
+            <span>重複の可能性があります</span>
+          </div>
+          <p id="receiptDuplicateAlertMsg" class="text-[10px] text-rose-800 font-medium leading-relaxed pl-5">
+            同じ日付・同じ金額の明細が既に登録されています。
+          </p>
+        </div>
+
         <!-- 担当者 動的グリッド -->
         <div>
           <label class="block text-[10px] font-bold text-slate-600 mb-0.5">担当者 (支払者)</label>
@@ -1572,18 +1585,18 @@
             <span id="retryImportBtnText">再度撮影する</span>
           </button>
 
-          <button type="button" onclick="skipCurrentReceipt()" id="btnSkipCurrentReceipt" class="text-[10.5px] text-slate-400 hover:text-slate-600 font-bold flex items-center space-x-0.5">
-            <span>この明細をスキップ</span>
-            <span>›</span>
+      <!-- 下部ボタン（3系統完備：登録をやめる・撮影をやり直す・登録する） -->
+      <div class="pt-2 border-t border-slate-100 flex-shrink-0 space-y-1.5">
+        <!-- 操作ボタン群 -->
+        <div class="grid grid-cols-3 gap-1.5">
+          <button type="button" onclick="cancelReceiptConfirmQueue()" class="py-2.5 rounded-xl border border-slate-200 text-xs font-bold text-slate-600 hover:bg-slate-50 active:scale-95 transition text-center cursor-pointer">
+            登録をやめる
           </button>
-        </div>
-
-        <!-- メイン操作：中止 ＆ 登録する（次へ） -->
-        <div class="flex space-x-2 pt-0.5">
-          <button type="button" onclick="cancelReceiptConfirmQueue()" class="w-1/3 py-2 rounded-xl border border-slate-200 text-xs font-bold text-slate-500 hover:bg-slate-50 active:scale-95 transition text-center cursor-pointer">やめる</button>
-          <button type="button" onclick="saveCurrentReceiptAndNext()" id="btnSaveConfirmNext" class="flex-1 py-2 rounded-xl bg-indigo-600 text-xs font-bold text-white hover:bg-indigo-700 active:scale-95 transition shadow-sm text-center cursor-pointer flex items-center justify-center space-x-1">
-            <span id="saveConfirmBtnText">この内容で登録する</span>
-            <svg class="w-3.5 h-3.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.3" d="M5 13l4 4L19 7"/></svg>
+          <button type="button" onclick="retryCurrentImport()" class="py-2.5 rounded-xl border border-indigo-200 bg-indigo-50/70 text-xs font-bold text-indigo-700 hover:bg-indigo-100 active:scale-95 transition text-center cursor-pointer">
+            撮影をやり直す
+          </button>
+          <button type="button" onclick="saveCurrentReceiptAndNext()" id="btnSaveConfirmNext" class="py-2.5 rounded-xl bg-indigo-600 text-xs font-bold text-white hover:bg-indigo-700 active:scale-95 transition shadow-sm text-center cursor-pointer">
+            <span id="saveConfirmBtnText">登録する</span>
           </button>
         </div>
       </div>
@@ -3914,7 +3927,7 @@
       showToast('スプレッドシートURLを保存しました');
     }
 
-    // ==================== Gemini API 接続テスト（家計簿アプリ完全準拠） ====================
+    // ==================== Gemini API 接続テスト（日本語判定） ★フェーズ1 ====================
     async function testGeminiApiKey() {
       const input = document.getElementById('geminiApiKey');
       const spinner = document.getElementById('testApiSpinner');
@@ -3926,7 +3939,7 @@
       if (!key) {
         showJapaneseErrorModal(
           'APIキーが未入力です',
-          'Gemini APIキーが入力されていません。設定画面でAPIキーを入力してからテストを実行してください。',
+          'Gemini APIキーが入力されていません。Google AI Studioで取得したAPIキーを入力してからテストを実行してください。',
           'Error: API_KEY_MISSING'
         );
         return;
@@ -3942,24 +3955,21 @@
       if (resBox) resBox.classList.add('hidden');
 
       try {
-        // 家計簿アプリと同一の高速モデル一覧チェック (GET)
         const testUrl = `https://generativelanguage.googleapis.com/v1beta/models?key=${key}`;
-        const response = await fetch(testUrl, { method: 'GET' });
+        const response = await fetch(testUrl);
         const data = await response.json();
 
         if (response.ok) {
-          const usableModels = (data.models || [])
-            .map(m => m.name.replace('models/', ''))
-            .filter(name => name.includes('flash'))
-            .slice(0, 3)
-            .join(', ');
-
+          // 利用可能なFlashモデルを自動検出
+          const models = data.models || [];
+          const activeModel = await resolveGeminiModel(key);
           if (resBox) {
             resBox.className = 'p-2 rounded-xl text-[11px] leading-tight font-bold bg-emerald-50 text-emerald-800 border border-emerald-200 block';
-            resBox.textContent = `接続成功！高速モデル利用可能 (${usableModels || 'gemini-3.5-flash-lite 稼働可能'})`;
+            resBox.textContent = `接続成功：Gemini APIへの通信を確認しました。（使用モデル: ${activeModel}）`;
           }
           showToast('接続に成功しました');
         } else {
+          // 英語エラーを解析して日本語でエラー画面を表示
           let jpTitle = 'API接続に失敗しました';
           let jpMsg = 'Google AIサーバーとの通信でエラーが返されました。';
           const errMsg = data.error?.message || response.statusText;
@@ -5400,14 +5410,86 @@
       showToast('解析を中断しました');
     }
 
-    // ==================== 家計簿アプリ完全同一エンジン（3.5-flash-lite最優先＋3.8-flashフォールバック） ====================
-    async function analyzeReceiptWithGeminiAPI(base64Image, mimeType, abortSignal, apiKey) {
-      // 家計簿アプリと完全一致のモデル優先順位
-      const models = ['gemini-3.5-flash-lite', 'gemini-3.8-flash'];
-      let lastError = null;
-      let lastErrorRaw = '';
+    // 利用可能な最新Flashモデルを自動検出・解決するヘルパー ★v1.03 (Gemini 3.8 / 3.5対応)
+    let cachedGeminiModel = null;
+    const CANDIDATE_GEMINI_MODELS = [
+      'gemini-3.8-flash',
+      'gemini-3.5-flash-lite',
+      'gemini-3-flash',
+      'gemini-3.5-flash',
+      'gemini-2.5-flash'
+    ];
 
-      const prompt = `あなたは領収書・レシートの高速高精度OCRエンジンです。
+    async function resolveGeminiModel(apiKey) {
+      if (cachedGeminiModel && !cachedGeminiModel.startsWith('gemini-1.') && !cachedGeminiModel.startsWith('gemini-2.')) return cachedGeminiModel;
+      const stored = localStorage.getItem('fbps_resolved_gemini_model');
+      if (stored && !stored.startsWith('gemini-1.') && !stored.startsWith('gemini-2.')) {
+        cachedGeminiModel = stored;
+        return stored;
+      }
+
+      try {
+        const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`);
+        if (res.ok) {
+          const data = await res.json();
+          const list = (data.models || []).filter(m => 
+            m.supportedGenerationMethods && m.supportedGenerationMethods.includes('generateContent')
+          );
+
+          for (const cand of CANDIDATE_GEMINI_MODELS) {
+            if (list.some(m => m.name === `models/${cand}` || m.name === cand)) {
+              cachedGeminiModel = cand;
+              localStorage.setItem('fbps_resolved_gemini_model', cand);
+              return cand;
+            }
+          }
+
+          const anyFlash = list.find(m => m.name && m.name.toLowerCase().includes('flash') && !m.name.includes('tts') && !m.name.includes('audio') && !m.name.includes('image'));
+          if (anyFlash) {
+            const cleaned = anyFlash.name.replace(/^models\//, '');
+            cachedGeminiModel = cleaned;
+            localStorage.setItem('fbps_resolved_gemini_model', cleaned);
+            return cleaned;
+          }
+        }
+      } catch (_) {}
+
+      cachedGeminiModel = 'gemini-3.8-flash';
+      return cachedGeminiModel;
+    }
+
+    async function handleReceiptUpload(file, member = '法人', sourceTrigger = 'camera') {
+      const apiKey = localStorage.getItem('fbps_gemini_api_key') || '';
+      if (!apiKey) {
+        showJapaneseErrorModal(
+          'APIキーが設定されていません',
+          'レシートの自動解析にはGemini APIキーが必要です。右上の設定アイコン（⚙️）からAPIキーを入力・保存してください。',
+          'Error: API_KEY_NOT_CONFIGURED'
+        );
+        return;
+      }
+
+      // 解析中モーダルの起動
+      isManualAbort = false;
+      const analyzingModal = document.getElementById('receiptAnalyzingModal');
+      const subTextEl = document.getElementById('receiptAnalyzingSubText');
+      if (subTextEl) subTextEl.textContent = `【${member}】のレシートを解析中…`;
+      openModal('receiptAnalyzingModal');
+
+      // 10秒タイマー ＆ AbortController のセット
+      activeAbortController = new AbortController();
+      const timeoutId = setTimeout(() => {
+        if (activeAbortController) {
+          activeAbortController.abort();
+        }
+      }, 10000); // 10秒自動タイムアウト
+
+      try {
+        // 1. クライアント側で超高速圧縮（長辺1280px / 0.75品質）
+        const base64Image = await compressImage(file, 1280, 0.75);
+
+        // 2. 最速優先・複数レシート（最大4枚）抽出プロンプト
+        const prompt = `あなたは領収書・レシートの高速高精度OCRエンジンです。
 画像に含まれるすべてのレシート（最大4枚程度）を検出し、1件ずつ抽出してJSON配列で出力してください。
 
 出力形式（JSON配列のみを出力。Markdownの\`\`\`や説明文は一切含めないでください）:
@@ -5425,10 +5507,10 @@
 ]
 
 項目抽出ルール:
-1. date: レシート記載の日付（YYYY-MM-DD形式）。不明なら空文字 ""
-2. amount: 税込の支払合計金額（数値のみ）。不明なら 0
+1. date: レシート記載の日付（YYYY-MM-DD形式）。不明・曖昧な場合は空文字 ""
+2. amount: 税込の支払合計金額（数値のみ）。不明な場合は 0
 3. title: レシート最上部の店名や会社名（例: セブン-イレブン, 出光, タイムズ24, Amazon）。不明なら空文字 ""
-4. category: 次の13科目から最も適切な科目を1つ選択（不明なら空文字 ""）:
+4. category: 次の13科目から内容に基づき最も適切な科目を1つ選択（不明なら空文字 ""）:
    [事務用品/消耗品, 旅費交通費, 出張食事代, 時間貸駐車場代, 車両関係費, ガソリン代, 会議費, 福利厚生費(懇親会等), 新聞図書費, 印紙/役所関係, 振込手数料, 税金支払, 雑費]
 5. paymentMethod:
    - クレジット系記載（クレジット, VISA, Master, JCB, タッチ決済等）➔ "法人カード"
@@ -5438,102 +5520,88 @@
 7. taxRate: 軽減税率表記があれば 8、通常なら 10
 8. memo: 主な品名や明細（例: "コピー用紙", "ガソリン 30L", "コインパーキング 2h"）。長文不要
 
-重要: 人間が確認画面で修正するため、長考せず最速で即答してください。`;
+重要指示:
+迷った項目は人間が確認画面で入力・手直しするため、無理に長考や推測をせず空文字 "" または初期値として最速で即答してください。`;
 
-      for (const model of models) {
-        if (abortSignal && abortSignal.aborted) throw new DOMException('Aborted', 'AbortError');
-        const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
-
-        // 家計簿アプリと完全同一の超高速パラメータ構造（思考オーバーヘッドなし）
-        const payload = {
-          contents: [{ parts: [{ text: prompt }, { inlineData: { mimeType, data: base64Image } }] }],
+        const requestBody = {
+          contents: [
+            {
+              parts: [
+                { text: prompt },
+                {
+                  inline_data: {
+                    mime_type: 'image/jpeg',
+                    data: base64Image
+                  }
+                }
+              ]
+            }
+          ],
           generationConfig: {
             temperature: 0.1,
-            responseMimeType: "application/json"
+            maxOutputTokens: 1024
           }
         };
 
-        const timeoutController = new AbortController();
-        const timeoutId = setTimeout(() => timeoutController.abort(), 8500); // 家計簿アプリ準拠の8.5秒タイムアウト
+        // 利用可能モデルの自動決定（フォールバックリトライ付き） ★v1.02
+        let targetModel = await resolveGeminiModel(apiKey);
+        let response = null;
+        let lastErr = null;
 
-        const onAbort = () => timeoutController.abort();
-        if (abortSignal) abortSignal.addEventListener('abort', onAbort, { once: true });
+        const tryModels = [targetModel, ...CANDIDATE_GEMINI_MODELS.filter(m => m !== targetModel)];
 
-        try {
-          const resp = await fetch(endpoint, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload),
-            signal: timeoutController.signal
-          });
-
-          clearTimeout(timeoutId);
-          if (abortSignal) abortSignal.removeEventListener('abort', onAbort);
-
-          if (!resp.ok) {
-            const errJson = await resp.json().catch(() => ({}));
-            const errMsg = errJson.error?.message || `HTTP ${resp.status}`;
-            lastError = new Error(`[${model}] ${errMsg}`);
-            lastErrorRaw = JSON.stringify(errJson, null, 2);
-            continue; // 次のモデル（3.8-flash）へ即時フォールバック
-          }
-
-          const resData = await resp.json();
-          const textCandidate = resData.candidates?.[0]?.content?.parts?.[0]?.text;
-          if (!textCandidate) throw new Error('解析結果テキストが空です');
-
-          const cleanJson = textCandidate.replace(/```(?:json)?/gi, '').replace(/```/g, '').trim();
-          let parsed = null;
+        for (const mod of tryModels) {
           try {
-            parsed = JSON.parse(cleanJson);
-          } catch (_) {
-            const match = cleanJson.match(/\[[\s\S]*\]/);
-            if (match) parsed = JSON.parse(match[0]);
-          }
+            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${mod}:generateContent?key=${apiKey}`;
+            response = await fetch(apiUrl, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(requestBody),
+              signal: activeAbortController.signal
+            });
 
-          if (parsed) {
-            return Array.isArray(parsed) ? parsed : [parsed];
+            if (response.ok) {
+              cachedGeminiModel = mod;
+              localStorage.setItem('fbps_resolved_gemini_model', mod);
+              break;
+            } else if (response.status === 404) {
+              // 404なら次の候補モデルで即座に試行
+              continue;
+            } else {
+              break;
+            }
+          } catch (e) {
+            lastErr = e;
+            if (e.name === 'AbortError') throw e;
           }
-          throw new Error('JSONのパースに失敗しました');
-
-        } catch (err) {
-          clearTimeout(timeoutId);
-          if (abortSignal) abortSignal.removeEventListener('abort', onAbort);
-          if (abortSignal && abortSignal.aborted) throw abortSignal.reason || new DOMException('Aborted', 'AbortError');
-          lastError = err;
-          lastErrorRaw = err.stack || err.toString();
         }
-      }
 
-      const finalErr = lastError || new Error('レシート解析に失敗しました');
-      finalErr.rawDetail = lastErrorRaw;
-      throw finalErr;
-    }
+        clearTimeout(timeoutId);
 
-    async function handleReceiptUpload(file, member = '法人', sourceTrigger = 'camera') {
-      const apiKey = localStorage.getItem('fbps_gemini_api_key') || '';
-      if (!apiKey) {
-        showJapaneseErrorModal(
-          'APIキーが設定されていません',
-          'レシートの自動解析にはGemini APIキーが必要です。右上の設定アイコン（⚙️）からAPIキーを入力・保存してください。',
-          'Error: API_KEY_NOT_CONFIGURED'
-        );
-        return;
-      }
+        if (!response || !response.ok) {
+          const errData = response ? await response.json().catch(() => ({})) : {};
+          throw new Error(errData.error?.message || (lastErr ? lastErr.message : `HTTP ${response ? response.status : 'ERR'}`));
+        }
 
-      isManualAbort = false;
-      const subTextEl = document.getElementById('receiptAnalyzingSubText');
-      if (subTextEl) subTextEl.textContent = `【${member}】のレシートを解析中…`;
-      openModal('receiptAnalyzingModal');
+        const data = await response.json();
+        const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
 
-      activeAbortController = new AbortController();
+        // JSON配列の抽出
+        let cleanJsonText = rawText.trim();
+        cleanJsonText = cleanJsonText.replace(/```(?:json)?/gi, '').replace(/```/g, '').trim();
 
-      try {
-        // 1. クライアント側で超高速圧縮（長辺1280px / 0.75品質）
-        const base64Image = await compressImage(file, 1280, 0.75);
-
-        // 2. 家計簿アプリ完全準拠エンジンで解析実行
-        const parsedItems = await analyzeReceiptWithGeminiAPI(base64Image, 'image/jpeg', activeAbortController.signal, apiKey);
+        let parsedItems = [];
+        try {
+          const parsed = JSON.parse(cleanJsonText);
+          if (Array.isArray(parsed)) parsedItems = parsed;
+          else if (typeof parsed === 'object' && parsed !== null) parsedItems = [parsed];
+        } catch (jsonErr) {
+          // 正規表現による [ ... ] の救出
+          const match = cleanJsonText.match(/\[[\s\S]*\]/);
+          if (match) {
+            try { parsedItems = JSON.parse(match[0]); } catch (_) {}
+          }
+        }
 
         closeModal('receiptAnalyzingModal');
 
@@ -5541,44 +5609,60 @@
           showJapaneseErrorModal(
             'レシートを認識できませんでした',
             '画像から金額や日付のテキストを読み取ることができませんでした。明るい場所でレシート全体が写るように再度撮影いただくか、「手入力」をご利用ください。',
-            'No items parsed'
+            rawText
           );
           return;
         }
 
-        // 3. キューへ格納して確認モーダルを開く
-        parsedReceiptQueue = parsedItems.map(item => ({
-          date: item.date || getTodayString(),
-          amount: Number(item.amount) || 0,
-          title: item.title || '',
-          category: businessCategories.includes(item.category) ? item.category : (businessCategories[0] || '事務用品/消耗品'),
-          paymentMethod: normalizePaymentMethodName(item.paymentMethod),
-          member: member || '法人',
-          costType: 'variable',
-          isInvoice: item.isInvoice !== false,
-          taxRate: (item.taxRate === 8) ? 8 : 10,
-          memo: item.memo || ''
-        }));
+        // 解析結果キューのセット ＆ 順次確認開始
+        parsedReceiptQueue = parsedItems.map(item => {
+          const parsedDate = item.date || getTodayString();
+          const parsedAmount = Number(item.amount) || 0;
+          const parsedTitle = item.title || '';
+
+          // 重複チェック（登録済み明細の中から同日・同額を検索）
+          const dupTarget = transactions.find(t => {
+            if (t.date !== parsedDate) return false;
+            if (Number(t.amount) !== parsedAmount) return false;
+            return true;
+          });
+
+          return {
+            date: parsedDate,
+            amount: parsedAmount,
+            title: parsedTitle,
+            category: businessCategories.includes(item.category) ? item.category : (businessCategories[0] || '事務用品/消耗品'),
+            paymentMethod: normalizePaymentMethodName(item.paymentMethod),
+            member: member || '法人',
+            costType: 'variable',
+            isInvoice: item.isInvoice !== false,
+            taxRate: (item.taxRate === 8) ? 8 : 10,
+            memo: item.memo || '',
+            isDuplicate: !!dupTarget,
+            duplicateTarget: dupTarget || null
+          };
+        });
 
         currentReceiptIndex = 0;
         openReceiptConfirmModal(0);
 
       } catch (err) {
+        clearTimeout(timeoutId);
         closeModal('receiptAnalyzingModal');
-        if (isManualAbort) return;
+
+        if (isManualAbort) return; // 手動中断なら何もしない
 
         if (err.name === 'AbortError') {
           showJapaneseErrorModal(
-            '解析がタイムアウトしました（8.5秒経過）',
+            '解析がタイムアウトしました（10秒経過）',
             '通信に時間がかかりすぎたため処理を安全に中断しました。電波環境の良い場所で再度お試しいただくか、「手入力」をご利用ください。',
-            'Error: REQUEST_TIMEOUT'
+            'Error: REQUEST_TIMEOUT_10S'
           );
         } else {
-          const rawDetail = err.rawDetail || err.stack || String(err);
           showJapaneseErrorModal(
             'レシート解析中にエラーが発生しました',
             `Google AIサーバーとの通信中に問題が発生しました。インターネット接続とAPIキーをご確認ください。\n\n詳細: ${err.message}`,
-            rawDetail
+            err.stack || String(err)
           );
         }
       }
@@ -5620,6 +5704,21 @@
       confirmIsInvoice = (item.isInvoice !== false);
       confirmTaxRate = item.taxRate || 10;
 
+      // 重複検知バナーの表示制御（絵文字なし）
+      const dupBox = document.getElementById('receiptDuplicateAlertBox');
+      const dupMsg = document.getElementById('receiptDuplicateAlertMsg');
+      if (item.isDuplicate && item.duplicateTarget) {
+        if (dupBox) dupBox.classList.remove('hidden');
+        if (dupMsg) {
+          const dDate = item.duplicateTarget.date ? item.duplicateTarget.date.replace(/-/g, '/') : '';
+          const dTitle = item.duplicateTarget.title || '名称未設定';
+          const dAmt = Number(item.duplicateTarget.amount || 0).toLocaleString();
+          dupMsg.textContent = `既存明細「${dTitle}」（${dDate} / ¥${dAmt}）と同じ日付・金額です。内容をご確認ください。`;
+        }
+      } else {
+        if (dupBox) dupBox.classList.add('hidden');
+      }
+
       document.getElementById('confirmDate').value = item.date || getTodayString();
       document.getElementById('confirmAmount').value = item.amount > 0 ? item.amount : '';
       document.getElementById('confirmTitle').value = item.title || '';
@@ -5632,22 +5731,10 @@
       setupConfirmFormDropdowns(item.category, item.paymentMethod);
       renderConfirmMemberButtons();
 
-      // 再撮影/再選択ボタン文言の調整
-      const retryTextEl = document.getElementById('retryImportBtnText');
-      if (retryTextEl) {
-        retryTextEl.textContent = (lastImportSource === 'camera') ? '再度撮影する' : '再度画像を選択';
-      }
-
-      // 「この内容で登録する」ボタンの文言（次があるか否か）
+      // 「登録する」ボタンの文言（複数枚キューの場合は次へ誘導）
       const saveBtnTextEl = document.getElementById('saveConfirmBtnText');
       if (saveBtnTextEl) {
-        saveBtnTextEl.textContent = (index + 1 < totalCount) ? `登録して次の件へ (${index + 2}/${totalCount})` : 'この内容で登録する';
-      }
-
-      // スキップボタンの表示
-      const skipBtn = document.getElementById('btnSkipCurrentReceipt');
-      if (skipBtn) {
-        skipBtn.textContent = (index + 1 < totalCount) ? 'この明細をスキップ ›' : 'スキップして終了';
+        saveBtnTextEl.textContent = (index + 1 < totalCount) ? `登録して次へ (${index + 2}/${totalCount})` : '登録する';
       }
 
       openModal('receiptConfirmModal');

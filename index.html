@@ -187,7 +187,7 @@
         <div class="min-w-0">
           <div class="flex items-center space-x-1.5 whitespace-nowrap">
             <h1 class="text-sm font-extrabold tracking-tight text-slate-900 leading-none whitespace-nowrap">FBPS 口座外支出トラッカー</h1>
-            <span class="px-1.5 py-0.2 rounded-full bg-indigo-50 text-indigo-700 font-extrabold text-[8.5px] border border-indigo-200/80 shadow-2xs whitespace-nowrap">v1.05</span>
+            <span class="px-1.5 py-0.2 rounded-full bg-indigo-50 text-indigo-700 font-extrabold text-[8.5px] border border-indigo-200/80 shadow-2xs whitespace-nowrap">v1.06</span>
           </div>
           <span id="headerPeriodSub" class="text-[10px] font-bold text-indigo-600 block mt-0.5 leading-none">当月</span>
         </div>
@@ -3960,12 +3960,9 @@
         const data = await response.json();
 
         if (response.ok) {
-          // 利用可能なFlashモデルを自動検出
-          const models = data.models || [];
-          const activeModel = await resolveGeminiModel(key);
           if (resBox) {
             resBox.className = 'p-2 rounded-xl text-[11px] leading-tight font-bold bg-emerald-50 text-emerald-800 border border-emerald-200 block';
-            resBox.textContent = `接続成功：Gemini APIへの通信を確認しました。（使用モデル: ${activeModel}）`;
+            resBox.textContent = `接続成功：Gemini APIへの通信を確認しました。（高速モデル: gemini-3.5-flash-lite 利用準備完了）`;
           }
           showToast('接続に成功しました');
         } else {
@@ -5410,53 +5407,8 @@
       showToast('解析を中断しました');
     }
 
-    // 利用可能な最新Flashモデルを自動検出・解決するヘルパー ★v1.03 (Gemini 3.8 / 3.5対応)
-    let cachedGeminiModel = null;
-    const CANDIDATE_GEMINI_MODELS = [
-      'gemini-3.8-flash',
-      'gemini-3.5-flash-lite',
-      'gemini-3-flash',
-      'gemini-3.5-flash',
-      'gemini-2.5-flash'
-    ];
-
-    async function resolveGeminiModel(apiKey) {
-      if (cachedGeminiModel && !cachedGeminiModel.startsWith('gemini-1.') && !cachedGeminiModel.startsWith('gemini-2.')) return cachedGeminiModel;
-      const stored = localStorage.getItem('fbps_resolved_gemini_model');
-      if (stored && !stored.startsWith('gemini-1.') && !stored.startsWith('gemini-2.')) {
-        cachedGeminiModel = stored;
-        return stored;
-      }
-
-      try {
-        const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`);
-        if (res.ok) {
-          const data = await res.json();
-          const list = (data.models || []).filter(m => 
-            m.supportedGenerationMethods && m.supportedGenerationMethods.includes('generateContent')
-          );
-
-          for (const cand of CANDIDATE_GEMINI_MODELS) {
-            if (list.some(m => m.name === `models/${cand}` || m.name === cand)) {
-              cachedGeminiModel = cand;
-              localStorage.setItem('fbps_resolved_gemini_model', cand);
-              return cand;
-            }
-          }
-
-          const anyFlash = list.find(m => m.name && m.name.toLowerCase().includes('flash') && !m.name.includes('tts') && !m.name.includes('audio') && !m.name.includes('image'));
-          if (anyFlash) {
-            const cleaned = anyFlash.name.replace(/^models\//, '');
-            cachedGeminiModel = cleaned;
-            localStorage.setItem('fbps_resolved_gemini_model', cleaned);
-            return cleaned;
-          }
-        }
-      } catch (_) {}
-
-      cachedGeminiModel = 'gemini-3.8-flash';
-      return cachedGeminiModel;
-    }
+    // 家計簿アプリで2秒の実績がある最速軽量モデル配列（事前問い合わせ全廃） ★v1.06
+    const FAST_GEMINI_MODELS = ['gemini-3.5-flash-lite', 'gemini-3.8-flash'];
 
     async function handleReceiptUpload(file, member = '法人', sourceTrigger = 'camera') {
       const apiKey = localStorage.getItem('fbps_gemini_api_key') || '';
@@ -5476,61 +5428,37 @@
       if (subTextEl) subTextEl.textContent = `【${member}】のレシートを解析中…`;
       openModal('receiptAnalyzingModal');
 
-      // 10秒タイマー ＆ AbortController のセット
+      // 家計簿アプリ完全準拠のタイムアウト設定（8.5秒）
       activeAbortController = new AbortController();
       const timeoutId = setTimeout(() => {
         if (activeAbortController) {
           activeAbortController.abort();
         }
-      }, 10000); // 10秒自動タイムアウト
+      }, 8500);
 
       try {
-        // 1. クライアント側で超高速圧縮（長辺1280px / 0.75品質）
-        const base64Image = await compressImage(file, 1280, 0.75);
+        // 1. クライアント側で超高速圧縮（長辺1280px / 0.8品質）
+        const base64Image = await compressImage(file, 1280, 0.8);
 
-        // 2. 最速優先・複数レシート（最大4枚）抽出プロンプト
-        const prompt = `あなたは領収書・レシートの高速高精度OCRエンジンです。
-画像に含まれるすべてのレシート（最大4枚程度）を検出し、1件ずつ抽出してJSON配列で出力してください。
+        // 2. 最速JSONプロンプト（思考カット・決定論的抽出）
+        const promptText = `あなたは日本の経費レシート解析アシスタントです。画像から情報を抽出し、指定のJSON形式のみで返答してください。Markdownのバッククォートは含めないでください。
 
-出力形式（JSON配列のみを出力。Markdownの\`\`\`や説明文は一切含めないでください）:
-[
-  {
-    "date": "YYYY-MM-DD",
-    "amount": 1234,
-    "title": "店舗名・支払先",
-    "category": "勘定科目名",
-    "paymentMethod": "支払い方法",
-    "isInvoice": true,
-    "taxRate": 10,
-    "memo": "品名・内容メモ"
-  }
-]
+科目ルール:
+- 事務用品/消耗品/旅費交通費/出張食事代/時間貸駐車場代/車両関係費/ガソリン代/会議費/福利厚生費(懇親会等)/新聞図書費/印紙/役所関係/振込手数料/税金支払/雑費
+支払い方法候補: 法人カード/個人クレカ/楽天カード/PayPay/d払い/交通系IC / Suica/楽天ペイ/現金/振込/仮払金/不明
 
-項目抽出ルール:
-1. date: レシート記載の日付（YYYY-MM-DD形式）。不明・曖昧な場合は空文字 ""
-2. amount: 税込の支払合計金額（数値のみ）。不明な場合は 0
-3. title: レシート最上部の店名や会社名（例: セブン-イレブン, 出光, タイムズ24, Amazon）。不明なら空文字 ""
-4. category: 次の13科目から内容に基づき最も適切な科目を1つ選択（不明なら空文字 ""）:
-   [事務用品/消耗品, 旅費交通費, 出張食事代, 時間貸駐車場代, 車両関係費, ガソリン代, 会議費, 福利厚生費(懇親会等), 新聞図書費, 印紙/役所関係, 振込手数料, 税金支払, 雑費]
-5. paymentMethod:
-   - クレジット系記載（クレジット, VISA, Master, JCB, タッチ決済等）➔ "法人カード"
-   - 電子マネー/QR記載（PayPay, d払い, Suica, 交通系IC, 楽天ペイ等）➔ 該当名
-   - 現金表記、記載不明、または判別できない場合 ➔ "現金"
-6. isInvoice: 「T+13桁」の適格登録番号または適格表記があれば true、なければ false
-7. taxRate: 軽減税率表記があれば 8、通常なら 10
-8. memo: 主な品名や明細（例: "コピー用紙", "ガソリン 30L", "コインパーキング 2h"）。長文不要
+返却JSON構造:
+{"receipts":[{"storeName":"支払先店舗名","date":"YYYY-MM-DD","amount":合計金額数値,"category":"科目名","paymentMethod":"推定支払い方法","isInvoice":true,"taxRate":10,"itemsSummary":"購入品"}]}`;
 
-重要指示:
-迷った項目は人間が確認画面で入力・手直しするため、無理に長考や推測をせず空文字 "" または初期値として最速で即答してください。`;
-
-        const requestBody = {
+        // 家計簿アプリと完全一致の軽量パラメータ
+        const payload = {
           contents: [
             {
               parts: [
-                { text: prompt },
+                { text: promptText },
                 {
-                  inline_data: {
-                    mime_type: 'image/jpeg',
+                  inlineData: {
+                    mimeType: 'image/jpeg',
                     data: base64Image
                   }
                 }
@@ -5539,36 +5467,30 @@
           ],
           generationConfig: {
             temperature: 0.1,
-            maxOutputTokens: 1024
+            responseMimeType: "application/json"
           }
         };
 
-        // 利用可能モデルの自動決定（フォールバックリトライ付き） ★v1.02
-        let targetModel = await resolveGeminiModel(apiKey);
         let response = null;
         let lastErr = null;
 
-        const tryModels = [targetModel, ...CANDIDATE_GEMINI_MODELS.filter(m => m !== targetModel)];
-
-        for (const mod of tryModels) {
+        // 3.5-flash-lite へ直行（ダメだった場合のみ 3.8-flash へフォールバック）
+        for (const model of FAST_GEMINI_MODELS) {
           try {
-            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${mod}:generateContent?key=${apiKey}`;
+            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
             response = await fetch(apiUrl, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(requestBody),
+              body: JSON.stringify(payload),
               signal: activeAbortController.signal
             });
 
             if (response.ok) {
-              cachedGeminiModel = mod;
-              localStorage.setItem('fbps_resolved_gemini_model', mod);
               break;
-            } else if (response.status === 404) {
-              // 404なら次の候補モデルで即座に試行
-              continue;
             } else {
-              break;
+              const errData = await response.json().catch(() => ({}));
+              lastErr = new Error(`[${model}] ${errData.error?.message || response.statusText}`);
+              continue;
             }
           } catch (e) {
             lastErr = e;
@@ -5579,33 +5501,27 @@
         clearTimeout(timeoutId);
 
         if (!response || !response.ok) {
-          const errData = response ? await response.json().catch(() => ({})) : {};
-          throw new Error(errData.error?.message || (lastErr ? lastErr.message : `HTTP ${response ? response.status : 'ERR'}`));
+          throw lastErr || new Error('レシート解析サーバーへの接続に失敗しました');
         }
 
         const data = await response.json();
         const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+        if (!rawText) throw new Error('解析結果が空でした');
 
-        // JSON配列の抽出
-        let cleanJsonText = rawText.trim();
-        cleanJsonText = cleanJsonText.replace(/```(?:json)?/gi, '').replace(/```/g, '').trim();
+        // JSONの抽出（家計簿アプリ同一処理）
+        const cleanJson = rawText.replace(/```json/gi, '').replace(/```/g, '').trim();
+        const jsonMatch = cleanJson.match(/\{[\s\S]*\}/) || cleanJson.match(/\[[\s\S]*\]/);
+        if (!jsonMatch) throw new Error('解析結果からJSON形式を抽出できませんでした');
 
-        let parsedItems = [];
-        try {
-          const parsed = JSON.parse(cleanJsonText);
-          if (Array.isArray(parsed)) parsedItems = parsed;
-          else if (typeof parsed === 'object' && parsed !== null) parsedItems = [parsed];
-        } catch (jsonErr) {
-          // 正規表現による [ ... ] の救出
-          const match = cleanJsonText.match(/\[[\s\S]*\]/);
-          if (match) {
-            try { parsedItems = JSON.parse(match[0]); } catch (_) {}
-          }
-        }
+        const parsedResult = JSON.parse(jsonMatch[0]);
+        let rawItems = [];
+        if (Array.isArray(parsedResult)) rawItems = parsedResult;
+        else if (Array.isArray(parsedResult.receipts)) rawItems = parsedResult.receipts;
+        else if (typeof parsedResult === 'object') rawItems = [parsedResult];
 
         closeModal('receiptAnalyzingModal');
 
-        if (!parsedItems || parsedItems.length === 0) {
+        if (!rawItems || rawItems.length === 0) {
           showJapaneseErrorModal(
             'レシートを認識できませんでした',
             '画像から金額や日付のテキストを読み取ることができませんでした。明るい場所でレシート全体が写るように再度撮影いただくか、「手入力」をご利用ください。',
@@ -5615,10 +5531,10 @@
         }
 
         // 解析結果キューのセット ＆ 順次確認開始
-        parsedReceiptQueue = parsedItems.map(item => {
+        parsedReceiptQueue = rawItems.map(item => {
           const parsedDate = item.date || getTodayString();
           const parsedAmount = Number(item.amount) || 0;
-          const parsedTitle = item.title || '';
+          const parsedTitle = item.storeName || item.title || '';
 
           // 重複チェック（登録済み明細の中から同日・同額を検索）
           const dupTarget = transactions.find(t => {
@@ -5637,7 +5553,7 @@
             costType: 'variable',
             isInvoice: item.isInvoice !== false,
             taxRate: (item.taxRate === 8) ? 8 : 10,
-            memo: item.memo || '',
+            memo: item.itemsSummary || item.memo || '',
             isDuplicate: !!dupTarget,
             duplicateTarget: dupTarget || null
           };
@@ -5654,9 +5570,9 @@
 
         if (err.name === 'AbortError') {
           showJapaneseErrorModal(
-            '解析がタイムアウトしました（10秒経過）',
+            '解析がタイムアウトしました（通信制限時間超過）',
             '通信に時間がかかりすぎたため処理を安全に中断しました。電波環境の良い場所で再度お試しいただくか、「手入力」をご利用ください。',
-            'Error: REQUEST_TIMEOUT_10S'
+            'Error: REQUEST_TIMEOUT'
           );
         } else {
           showJapaneseErrorModal(

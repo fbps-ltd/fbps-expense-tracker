@@ -187,7 +187,7 @@
         <div class="min-w-0">
           <div class="flex items-center space-x-1.5 whitespace-nowrap">
             <h1 class="text-sm font-extrabold tracking-tight text-slate-900 leading-none whitespace-nowrap">FBPS 口座外支出トラッカー</h1>
-            <span class="px-1.5 py-0.2 rounded-full bg-indigo-50 text-indigo-700 font-extrabold text-[8.5px] border border-indigo-200/80 shadow-2xs whitespace-nowrap">v1.01</span>
+            <span class="px-1.5 py-0.2 rounded-full bg-indigo-50 text-indigo-700 font-extrabold text-[8.5px] border border-indigo-200/80 shadow-2xs whitespace-nowrap">v1.04</span>
           </div>
           <span id="headerPeriodSub" class="text-[10px] font-bold text-indigo-600 block mt-0.5 leading-none">当月</span>
         </div>
@@ -3914,7 +3914,7 @@
       showToast('スプレッドシートURLを保存しました');
     }
 
-    // ==================== Gemini API 接続テスト（日本語判定） ★フェーズ1 ====================
+    // ==================== Gemini API 接続テスト（家計簿アプリ完全準拠） ====================
     async function testGeminiApiKey() {
       const input = document.getElementById('geminiApiKey');
       const spinner = document.getElementById('testApiSpinner');
@@ -3926,7 +3926,7 @@
       if (!key) {
         showJapaneseErrorModal(
           'APIキーが未入力です',
-          'Gemini APIキーが入力されていません。Google AI Studioで取得したAPIキーを入力してからテストを実行してください。',
+          'Gemini APIキーが入力されていません。設定画面でAPIキーを入力してからテストを実行してください。',
           'Error: API_KEY_MISSING'
         );
         return;
@@ -3942,18 +3942,24 @@
       if (resBox) resBox.classList.add('hidden');
 
       try {
+        // 家計簿アプリと同一の高速モデル一覧チェック (GET)
         const testUrl = `https://generativelanguage.googleapis.com/v1beta/models?key=${key}`;
-        const response = await fetch(testUrl);
+        const response = await fetch(testUrl, { method: 'GET' });
         const data = await response.json();
 
         if (response.ok) {
+          const usableModels = (data.models || [])
+            .map(m => m.name.replace('models/', ''))
+            .filter(name => name.includes('flash'))
+            .slice(0, 3)
+            .join(', ');
+
           if (resBox) {
             resBox.className = 'p-2 rounded-xl text-[11px] leading-tight font-bold bg-emerald-50 text-emerald-800 border border-emerald-200 block';
-            resBox.textContent = '接続成功：Gemini APIへの通信が確認できました。高速モデルを利用可能です。';
+            resBox.textContent = `接続成功！高速モデル利用可能 (${usableModels || 'gemini-3.5-flash-lite 稼働可能'})`;
           }
           showToast('接続に成功しました');
         } else {
-          // 英語エラーを解析して日本語でエラー画面を表示
           let jpTitle = 'API接続に失敗しました';
           let jpMsg = 'Google AIサーバーとの通信でエラーが返されました。';
           const errMsg = data.error?.message || response.statusText;
@@ -5394,38 +5400,14 @@
       showToast('解析を中断しました');
     }
 
-    async function handleReceiptUpload(file, member = '法人', sourceTrigger = 'camera') {
-      const apiKey = localStorage.getItem('fbps_gemini_api_key') || '';
-      if (!apiKey) {
-        showJapaneseErrorModal(
-          'APIキーが設定されていません',
-          'レシートの自動解析にはGemini APIキーが必要です。右上の設定アイコン（⚙️）からAPIキーを入力・保存してください。',
-          'Error: API_KEY_NOT_CONFIGURED'
-        );
-        return;
-      }
+    // ==================== 家計簿アプリ完全同一エンジン（3.5-flash-lite最優先＋3.8-flashフォールバック） ====================
+    async function analyzeReceiptWithGeminiAPI(base64Image, mimeType, abortSignal, apiKey) {
+      // 家計簿アプリと完全一致のモデル優先順位
+      const models = ['gemini-3.5-flash-lite', 'gemini-3.8-flash'];
+      let lastError = null;
+      let lastErrorRaw = '';
 
-      // 解析中モーダルの起動
-      isManualAbort = false;
-      const analyzingModal = document.getElementById('receiptAnalyzingModal');
-      const subTextEl = document.getElementById('receiptAnalyzingSubText');
-      if (subTextEl) subTextEl.textContent = `【${member}】のレシートを解析中…`;
-      openModal('receiptAnalyzingModal');
-
-      // 10秒タイマー ＆ AbortController のセット
-      activeAbortController = new AbortController();
-      const timeoutId = setTimeout(() => {
-        if (activeAbortController) {
-          activeAbortController.abort();
-        }
-      }, 10000); // 10秒自動タイムアウト
-
-      try {
-        // 1. クライアント側で超高速圧縮（長辺1280px / 0.75品質）
-        const base64Image = await compressImage(file, 1280, 0.75);
-
-        // 2. 最速優先・複数レシート（最大4枚）抽出プロンプト
-        const prompt = `あなたは領収書・レシートの高速高精度OCRエンジンです。
+      const prompt = `あなたは領収書・レシートの高速高精度OCRエンジンです。
 画像に含まれるすべてのレシート（最大4枚程度）を検出し、1件ずつ抽出してJSON配列で出力してください。
 
 出力形式（JSON配列のみを出力。Markdownの\`\`\`や説明文は一切含めないでください）:
@@ -5443,10 +5425,10 @@
 ]
 
 項目抽出ルール:
-1. date: レシート記載の日付（YYYY-MM-DD形式）。不明・曖昧な場合は空文字 ""
-2. amount: 税込の支払合計金額（数値のみ）。不明な場合は 0
+1. date: レシート記載の日付（YYYY-MM-DD形式）。不明なら空文字 ""
+2. amount: 税込の支払合計金額（数値のみ）。不明なら 0
 3. title: レシート最上部の店名や会社名（例: セブン-イレブン, 出光, タイムズ24, Amazon）。不明なら空文字 ""
-4. category: 次の13科目から内容に基づき最も適切な科目を1つ選択（不明なら空文字 ""）:
+4. category: 次の13科目から最も適切な科目を1つ選択（不明なら空文字 ""）:
    [事務用品/消耗品, 旅費交通費, 出張食事代, 時間貸駐車場代, 車両関係費, ガソリン代, 会議費, 福利厚生費(懇親会等), 新聞図書費, 印紙/役所関係, 振込手数料, 税金支払, 雑費]
 5. paymentMethod:
    - クレジット系記載（クレジット, VISA, Master, JCB, タッチ決済等）➔ "法人カード"
@@ -5456,63 +5438,102 @@
 7. taxRate: 軽減税率表記があれば 8、通常なら 10
 8. memo: 主な品名や明細（例: "コピー用紙", "ガソリン 30L", "コインパーキング 2h"）。長文不要
 
-重要指示:
-迷った項目は人間が確認画面で入力・手直しするため、無理に長考や推測をせず空文字 "" または初期値として最速で即答してください。`;
+重要: 人間が確認画面で修正するため、長考せず最速で即答してください。`;
 
-        const requestBody = {
-          contents: [
-            {
-              parts: [
-                { text: prompt },
-                {
-                  inline_data: {
-                    mime_type: 'image/jpeg',
-                    data: base64Image
-                  }
-                }
-              ]
-            }
-          ],
+      for (const model of models) {
+        if (abortSignal && abortSignal.aborted) throw new DOMException('Aborted', 'AbortError');
+        const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+
+        // 家計簿アプリと完全同一の超高速パラメータ構造（思考オーバーヘッドなし）
+        const payload = {
+          contents: [{ parts: [{ text: prompt }, { inlineData: { mimeType, data: base64Image } }] }],
           generationConfig: {
             temperature: 0.1,
-            maxOutputTokens: 1024
+            responseMimeType: "application/json"
           }
         };
 
-        const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
-        const response = await fetch(apiUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(requestBody),
-          signal: activeAbortController.signal
-        });
+        const timeoutController = new AbortController();
+        const timeoutId = setTimeout(() => timeoutController.abort(), 8500); // 家計簿アプリ準拠の8.5秒タイムアウト
 
-        clearTimeout(timeoutId);
+        const onAbort = () => timeoutController.abort();
+        if (abortSignal) abortSignal.addEventListener('abort', onAbort, { once: true });
 
-        if (!response.ok) {
-          const errData = await response.json().catch(() => ({}));
-          throw new Error(errData.error?.message || `HTTP ${response.status}: ${response.statusText}`);
-        }
-
-        const data = await response.json();
-        const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-
-        // JSON配列の抽出
-        let cleanJsonText = rawText.trim();
-        cleanJsonText = cleanJsonText.replace(/```(?:json)?/gi, '').replace(/```/g, '').trim();
-
-        let parsedItems = [];
         try {
-          const parsed = JSON.parse(cleanJsonText);
-          if (Array.isArray(parsed)) parsedItems = parsed;
-          else if (typeof parsed === 'object' && parsed !== null) parsedItems = [parsed];
-        } catch (jsonErr) {
-          // 正規表現による [ ... ] の救出
-          const match = cleanJsonText.match(/\[[\s\S]*\]/);
-          if (match) {
-            try { parsedItems = JSON.parse(match[0]); } catch (_) {}
+          const resp = await fetch(endpoint, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+            signal: timeoutController.signal
+          });
+
+          clearTimeout(timeoutId);
+          if (abortSignal) abortSignal.removeEventListener('abort', onAbort);
+
+          if (!resp.ok) {
+            const errJson = await resp.json().catch(() => ({}));
+            const errMsg = errJson.error?.message || `HTTP ${resp.status}`;
+            lastError = new Error(`[${model}] ${errMsg}`);
+            lastErrorRaw = JSON.stringify(errJson, null, 2);
+            continue; // 次のモデル（3.8-flash）へ即時フォールバック
           }
+
+          const resData = await resp.json();
+          const textCandidate = resData.candidates?.[0]?.content?.parts?.[0]?.text;
+          if (!textCandidate) throw new Error('解析結果テキストが空です');
+
+          const cleanJson = textCandidate.replace(/```(?:json)?/gi, '').replace(/```/g, '').trim();
+          let parsed = null;
+          try {
+            parsed = JSON.parse(cleanJson);
+          } catch (_) {
+            const match = cleanJson.match(/\[[\s\S]*\]/);
+            if (match) parsed = JSON.parse(match[0]);
+          }
+
+          if (parsed) {
+            return Array.isArray(parsed) ? parsed : [parsed];
+          }
+          throw new Error('JSONのパースに失敗しました');
+
+        } catch (err) {
+          clearTimeout(timeoutId);
+          if (abortSignal) abortSignal.removeEventListener('abort', onAbort);
+          if (abortSignal && abortSignal.aborted) throw abortSignal.reason || new DOMException('Aborted', 'AbortError');
+          lastError = err;
+          lastErrorRaw = err.stack || err.toString();
         }
+      }
+
+      const finalErr = lastError || new Error('レシート解析に失敗しました');
+      finalErr.rawDetail = lastErrorRaw;
+      throw finalErr;
+    }
+
+    async function handleReceiptUpload(file, member = '法人', sourceTrigger = 'camera') {
+      const apiKey = localStorage.getItem('fbps_gemini_api_key') || '';
+      if (!apiKey) {
+        showJapaneseErrorModal(
+          'APIキーが設定されていません',
+          'レシートの自動解析にはGemini APIキーが必要です。右上の設定アイコン（⚙️）からAPIキーを入力・保存してください。',
+          'Error: API_KEY_NOT_CONFIGURED'
+        );
+        return;
+      }
+
+      isManualAbort = false;
+      const subTextEl = document.getElementById('receiptAnalyzingSubText');
+      if (subTextEl) subTextEl.textContent = `【${member}】のレシートを解析中…`;
+      openModal('receiptAnalyzingModal');
+
+      activeAbortController = new AbortController();
+
+      try {
+        // 1. クライアント側で超高速圧縮（長辺1280px / 0.75品質）
+        const base64Image = await compressImage(file, 1280, 0.75);
+
+        // 2. 家計簿アプリ完全準拠エンジンで解析実行
+        const parsedItems = await analyzeReceiptWithGeminiAPI(base64Image, 'image/jpeg', activeAbortController.signal, apiKey);
 
         closeModal('receiptAnalyzingModal');
 
@@ -5520,12 +5541,12 @@
           showJapaneseErrorModal(
             'レシートを認識できませんでした',
             '画像から金額や日付のテキストを読み取ることができませんでした。明るい場所でレシート全体が写るように再度撮影いただくか、「手入力」をご利用ください。',
-            rawText
+            'No items parsed'
           );
           return;
         }
 
-        // 解析結果キューのセット ＆ 順次確認開始
+        // 3. キューへ格納して確認モーダルを開く
         parsedReceiptQueue = parsedItems.map(item => ({
           date: item.date || getTodayString(),
           amount: Number(item.amount) || 0,
@@ -5543,22 +5564,21 @@
         openReceiptConfirmModal(0);
 
       } catch (err) {
-        clearTimeout(timeoutId);
         closeModal('receiptAnalyzingModal');
-
-        if (isManualAbort) return; // 手動中断なら何もしない
+        if (isManualAbort) return;
 
         if (err.name === 'AbortError') {
           showJapaneseErrorModal(
-            '解析がタイムアウトしました（10秒経過）',
+            '解析がタイムアウトしました（8.5秒経過）',
             '通信に時間がかかりすぎたため処理を安全に中断しました。電波環境の良い場所で再度お試しいただくか、「手入力」をご利用ください。',
-            'Error: REQUEST_TIMEOUT_10S'
+            'Error: REQUEST_TIMEOUT'
           );
         } else {
+          const rawDetail = err.rawDetail || err.stack || String(err);
           showJapaneseErrorModal(
             'レシート解析中にエラーが発生しました',
             `Google AIサーバーとの通信中に問題が発生しました。インターネット接続とAPIキーをご確認ください。\n\n詳細: ${err.message}`,
-            err.stack || String(err)
+            rawDetail
           );
         }
       }
